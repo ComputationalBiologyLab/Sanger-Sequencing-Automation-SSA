@@ -40,11 +40,11 @@ class WelcomePage(QWidget):
 
         
         # Dev by
-        self.tlabel = QLabel('Developed by Computational Biology and Bioinformatics Lab \n at Zewail City, Cairo, Egypt.\n\nSanger Sequencing Analysis (SSA) ', self)
+        self.tlabel = QLabel('Developed by Bioinformatics and Computational Biology Unit \n at Zewail City, Cairo, Egypt.\n\nSanger Sequencing Analyzer (SSA) ', self)
         self.tlabel.setAlignment(Qt.AlignTop | Qt.AlignHCenter)
         self.tlabel.setStyleSheet('color: white;')
         font = self.tlabel.font()
-        font.setPointSize(12)
+        font.setPointSize(20)
         font.setBold(True)
         self.tlabel.setFont(font)
 

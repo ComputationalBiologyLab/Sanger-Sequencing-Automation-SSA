@@ -26,21 +26,42 @@ from PyQt5.QtCore import QObject, pyqtSignal
 
 
 from typing import Dict, Tuple
+import signal
+from threading import Thread, Event
+
+import xml.etree.ElementTree as ET
+import csv
 
 
 total_num_samples = 0
 num_finish = 0
 thread_lock_num_finish = threading.Lock()
-INTERVAL_TIME: int = 25
+INTERVAL_TIME: int = 240 * 2
 thread_lock_interval_time = threading.Lock()
 last_thread_creation_time = time.time()
+thread_lock_last_thread_creation_time = threading.Lock()
 
 MAX_BLAST_REQUESTS_PER_DAY: int = 100  # The maximum number of BLAST requests allowed per day.
 blast_req_sent: int = 0  # Counter for the number of BLAST requests sent in the current day.
 start_time_day: float = time.time()  # Timestamp marking the start of the current day for tracking BLAST requests.
 thread_lock_max_day: threading.Lock = threading.Lock()  # A lock to ensure thread-safe access to `blast_req_sent`.
 
-def find_matching_reads_paired_proc(reads_folder:str, is_blastnr: bool, is_blastnt: bool, is_blast_both: bool, is_overwrite: bool) -> Dict[str, Tuple[str, str]]: 
+is_mode_ab1 = True; # user can select folder either to have all ab1 or all fastq
+
+
+failed_files = set()
+
+files_with_error = []
+class TimeoutException(Exception):
+    pass
+
+def timeout_handler(signum, frame):
+    raise TimeoutException
+
+
+signal.signal(signal.SIGALRM, timeout_handler)
+
+def find_matching_reads_paired_proc(reads_folder:str, is_blastnr: bool, is_blastnt: bool, is_blast_both: bool, is_overwrite: bool, is_mode_ab1) -> Dict[str, Tuple[str, str]]: 
     """
     Public interface to find matching paired reads in a specified folder.
 
@@ -74,8 +95,11 @@ def find_matching_reads_paired_proc(reads_folder:str, is_blastnr: bool, is_blast
         raise TypeError("is_overwrite must be a boolean value")
     if not isinstance(is_blast_both, bool):
         raise TypeError("is_blast_both must be a boolean value")
-    return _find_matching_reads_paired_proc(reads_folder, is_blastnr, is_blastnt, is_blast_both, is_overwrite)
-    
+    if is_mode_ab1:
+        return _find_matching_reads_paired_proc(reads_folder, is_blastnr, is_blastnt, is_blast_both, is_overwrite)
+    else:
+        return _find_matching_reads_paired_proc_fastq(reads_folder, is_blastnr, is_blastnt, is_blast_both, is_overwrite)
+
 def _find_matching_reads_paired_proc(reads_folder:str, is_blastnr: bool, is_blastnt: bool, is_blast_both: bool, is_overwrite: bool) -> Dict[str, Tuple[str, str]]:
     """
     Internal function to find matching paired reads in the specified folder.
@@ -101,6 +125,84 @@ def _find_matching_reads_paired_proc(reads_folder:str, is_blastnr: bool, is_blas
                 reverse_reads[sample_name] = os.path.join(reads_folder, file_name)
         elif file_name.endswith("_F.ab1"):
                 sample_name = file_name[:-len("_F.ab1")]
+                forward_reads[sample_name] = os.path.join(reads_folder, file_name)
+
+    matches = {}
+    for sample_name in forward_reads:
+        forward_read = forward_reads.get(sample_name)
+        reverse_read = reverse_reads.get(sample_name)
+        if forward_read and reverse_read:
+            if is_overwrite or (not is_overwrite and sample_name not in gen_folders):
+                matches[sample_name] = (forward_read, reverse_read)
+            
+    write_log("Paired files that are going to be processed: ", matches)
+    return matches
+
+
+def _find_matching_reads_paired_proc_fastq(reads_folder:str, is_blastnr: bool, is_blastnt: bool, is_blast_both: bool, is_overwrite: bool) -> Dict[str, Tuple[str, str]]:
+    """
+    Internal function to find matching paired reads in the specified folder.
+
+    This function searches for paired read files in the given folder, and pairs them based on sample names extracted from the file names.
+
+    Args:
+        reads_folder (str): Path to the folder containing read files.
+        is_blastnr (bool): Indicates whether Blastnr processing is to be performed.
+        is_blastnt (bool): Indicates whether Blastnt processing is to be performed.
+        is_overwrite (bool): Flag to indicate whether existing processed files should be overwritten.
+
+    Returns:
+        Dict[str, Tuple[str, str]]: A dictionary mapping each sample name to a tuple of paths to the forward and reverse read files.
+    """
+    forward_reads: Dict[str, str] = {}
+    reverse_reads: Dict[str, str] = {}
+    blast_str: str = calc_blast_str(is_blastnr=is_blastnr, is_blastnt=is_blastnt, is_blast_both = is_blast_both)
+    gen_folders: List[str] = find_gen_pair_files(reads_folder, is_blastnt = is_blastnt, is_blastnr = is_blastnr, is_blastnt_nr = is_blast_both)
+    for file_name in os.listdir(reads_folder):
+        if  file_name.endswith("R.fastq"):
+                sample_name = file_name[:-len("R.fastq")]
+                reverse_reads[sample_name] = os.path.join(reads_folder, file_name)
+        elif file_name.endswith("F.fastq"):
+                sample_name = file_name[:-len("F.fastq")]
+                forward_reads[sample_name] = os.path.join(reads_folder, file_name)
+
+    matches = {}
+    for sample_name in forward_reads:
+        forward_read = forward_reads.get(sample_name)
+        reverse_read = reverse_reads.get(sample_name)
+        if forward_read and reverse_read:
+            if is_overwrite or (not is_overwrite and sample_name not in gen_folders):
+                matches[sample_name] = (forward_read, reverse_read)
+            
+    write_log("Paired files that are going to be processed: ", matches)
+    return matches
+
+
+def _find_matching_reads_paired_proc_fastq(reads_folder:str, is_blastnr: bool, is_blastnt: bool, is_blast_both: bool, is_overwrite: bool) -> Dict[str, Tuple[str, str]]:
+    """
+    Internal function to find matching paired reads in the specified folder.
+
+    This function searches for paired read files in the given folder, and pairs them based on sample names extracted from the file names.
+
+    Args:
+        reads_folder (str): Path to the folder containing read files.
+        is_blastnr (bool): Indicates whether Blastnr processing is to be performed.
+        is_blastnt (bool): Indicates whether Blastnt processing is to be performed.
+        is_overwrite (bool): Flag to indicate whether existing processed files should be overwritten.
+
+    Returns:
+        Dict[str, Tuple[str, str]]: A dictionary mapping each sample name to a tuple of paths to the forward and reverse read files.
+    """
+    forward_reads: Dict[str, str] = {}
+    reverse_reads: Dict[str, str] = {}
+    blast_str: str = calc_blast_str(is_blastnr=is_blastnr, is_blastnt=is_blastnt, is_blast_both = is_blast_both)
+    gen_folders: List[str] = find_gen_pair_files(reads_folder, is_blastnt = is_blastnt, is_blastnr = is_blastnr, is_blastnt_nr = is_blast_both)
+    for file_name in os.listdir(reads_folder):
+        if  file_name.endswith("R.fastq"):
+                sample_name = file_name[:-len("R.fastq")]
+                reverse_reads[sample_name] = os.path.join(reads_folder, file_name)
+        elif file_name.endswith("F.fastq"):
+                sample_name = file_name[:-len("F.fastq")]
                 forward_reads[sample_name] = os.path.join(reads_folder, file_name)
 
     matches = {}
@@ -347,19 +449,46 @@ def _run_blast_pair(input_file: str, program: str, database: str, output_folder:
         str: Path to the BLAST results file in XML format.
     """
     write_log("in _run_blast_pair [1]")
-    if is_send_blast(): # Am I allowed to send new blast request today? Hint, I can't send more than the MAX_BLAST_REQUESTS_PER_DAY as not to get banned from NCBI itself.
-        result_file: str = os.path.join(output_folder, f"blast_results_{database}.xml")
+
+    if is_send_blast():  # Am I allowed to send new blast request today?
+        result_file = os.path.join(output_folder, f"blast_results_{database}.xml")
         input_record = SeqIO.read(input_file, format="fasta")
         sleep_for_interval_bet_reqs_if_necessay(input_file, "pair")
-        write_log(f"(pair) File: {extract_filename(input_file)} will send qlblast reqest now")
-        result_handle = NCBIWWW.qblast(program, database, input_record.format("fasta"))
-        confirm_blast_sent()
-        write_log(f"(pair) File: {extract_filename(input_file)} got the results from qblast")
-        with open(result_file, "w") as out_handle:
-            out_handle.write(result_handle.read())
-        result_handle.close()
-        return result_file
-    else: # I have sent more thatn MAX_BLAST_REQUESTS_PER_DAY. Then I should sleep for the rest of the day
+        write_log(f"(pair) File: {extract_filename(input_file)} will send qlblast request now")
+        
+        result_handle = None
+        retry_count = 0
+        max_retries = 1
+        timeout = 30 * 60  # 7 minutes in seconds
+
+        while retry_count < max_retries:
+            result_event = Event()
+            result_thread = Thread(target=lambda: result_event.set(NCBIWWW.qblast(program, database, input_record.format("fasta"))))
+
+            result_thread.start()
+            result_thread.join(timeout)
+
+            if result_event.is_set():
+                result_handle = result_event.get()
+                break
+            else:
+                retry_count += 1
+                write_log(f"Retrying BLAST request for {extract_filename(input_file)} (Attempt {retry_count}/{max_retries})")
+                result_thread.join()  # Ensure thread is terminated before retrying
+
+        if result_handle:
+            confirm_blast_sent()
+            write_log(f"(pair) File: {extract_filename(input_file)} got the results from qblast")
+            with open(result_file, "w") as out_handle:
+                out_handle.write(result_handle.read())
+            result_handle.close()
+            has_error, error_message = parse_blast_result(result_file)
+            if has_error:
+                store_error_details(input_file, program, database, output_folder, result_file, error_message, "pair")
+            return result_file
+        else:
+            write_log(f"(pair) Failed to get BLAST results after {max_retries} attempts for file {extract_filename(input_file)}")
+    else:
         return sleep_till_end_of_day_then_search_again_pair(input_file, program, database, output_folder)
 
 def sleep_for_interval_bet_reqs_if_necessay(input_file: str, single_or_pair_txt: str)-> None:
@@ -391,23 +520,20 @@ def sleep_for_interval_bet_reqs_if_necessay(input_file: str, single_or_pair_txt:
     global last_thread_creation_time
     print("[2]")
     with thread_lock_interval_time:
-        # print("[3]/")
-        # print("[3]//")
-        # print("[3]////")
-        # print("[3]1/",last_thread_creation_time)
-        # print("[3]2/",INTERVAL_TIME)
-        # print("[3]1/",last_thread_creation_time)
-        # print("[3]2/",INTERVAL_TIME)
-        # print("[3]3/", time.time() - last_thread_creation_time)
-        # print("[3]4/",time.time() - last_thread_creation_time < INTERVAL_TIME)
         print("[3]", time.time(), last_thread_creation_time, INTERVAL_TIME, time.time() - last_thread_creation_time, time.time() - last_thread_creation_time < INTERVAL_TIME)
         while time.time() - last_thread_creation_time < INTERVAL_TIME:
             print("[4]")
             time_since_last_thread = time.time() - last_thread_creation_time
             sleep_time = INTERVAL_TIME - time_since_last_thread
             write_log(f"(f{single_or_pair_txt}) File: {extract_filename(input_file)} will sleep for {sleep_time} seconds")
-            time.sleep(sleep_time)
-        last_thread_creation_time = time.time()  
+            # time.sleep(sleep_time)
+            final_end_time = time.time() + sleep_time
+            while time.time() < final_end_time:
+                continue
+                
+            write_log(f"(f{single_or_pair_txt}) File: {extract_filename(input_file)} Woke up after {sleep_time} seconds")
+        with thread_lock_last_thread_creation_time:
+            last_thread_creation_time = time.time()  
 
 def sleep_till_end_of_day_then_search_again_pair(input_file: str, program: str, database: str, output_folder: str) -> str:
     """
@@ -451,7 +577,8 @@ def process_sample_paired(
     skip_middle_stages: bool,
     is_blastnr: bool,
     is_blastnt: bool,
-    is_blastBoth: bool
+    is_blastBoth: bool,
+    is_mode_ab1: bool,
 ) -> None:
     """
     Process a paired-end sample, including conversion, trimming, merging, and BLAST.
@@ -485,10 +612,18 @@ def process_sample_paired(
         raise ValueError("The combinations for is_blastnr, is_blastnt, is_blast_both is not valid, only one must be True and all others must be False")
 
     # Call the internal processing function
-    _process_sample_paired(
-        sample_name, forward_read, reverse_read, output_folder,
-        update_pb, skip_middle_stages, is_blastnr, is_blastnt, is_blastBoth
-    )
+    
+    if is_mode_ab1:
+        _process_sample_paired(
+            sample_name, forward_read, reverse_read, output_folder,
+            update_pb, skip_middle_stages, is_blastnr, is_blastnt, is_blastBoth
+        )
+    else:
+        print("before _process_sample_pairedJJJJJ", is_mode_ab1)
+        _process_sample_paired_fastq(
+            sample_name, forward_read, reverse_read, output_folder,
+            update_pb, skip_middle_stages, is_blastnr, is_blastnt, is_blastBoth, is_mode_ab1
+        )
 
 def _process_sample_paired(
     sample_name: str,
@@ -522,13 +657,57 @@ def _process_sample_paired(
     if skip_middle_stages:
         # blastnt_results_file, blastnr_results_file = process_sample_paired_no_middle_stage(is_blastnr, is_blastnt, is_blastBoth, forward_read, reverse_read, output_folder, update_pb)
         write_log("(pair) {sample_name} with no middle stage: it's like single, so it will be converted to single")
-        blastnt_results_file, blastnr_results_file = process_sample_single(sample_name, forward_read, output_folder, update_pb, is_blastnr, is_blastnt, is_blastBoth)
+        blastnt_results_file, blastnr_results_file = process_sample_single(sample_name, forward_read, output_folder, update_pb, is_blastnr, is_blastnt, is_blastBoth, is_mode_ab1)
     else:
-        blastnt_results_file, blastnr_results_file = process_sample_paired_middle_stage(sample_name, is_blastnr, is_blastnt, is_blastBoth, forward_read, reverse_read, output_folder, update_pb)
+        blastnt_results_file, blastnr_results_file = process_sample_paired_middle_stage(sample_name, is_blastnr, is_blastnt, is_blastBoth, forward_read, reverse_read, output_folder, update_pb, is_mode_ab1)
         
     # refresh_gui(update_pb)
     write_log_process_pair_single_blast_results(is_blastnr, is_blastnt, is_blastBoth, blastnt_results_file, blastnr_results_file)
     
+    
+    
+def _process_sample_paired_fastq(
+    sample_name: str,
+    forward_read: str,
+    reverse_read: str,
+    output_folder: str,
+    update_pb: Callable,
+    skip_middle_stages: bool,
+    is_blastnr: bool,
+    is_blastnt: bool,
+    is_blastBoth: bool,
+    is_mode_ab1: bool
+) -> None:
+    """
+    Process a paired-end sample, including conversion, trimming, merging, and BLAST.
+
+    Args:
+        sample_name (str): The name of the sample.
+        forward_read (str): Path to the forward read file.
+        reverse_read (str): Path to the reverse read file.
+        output_folder (str): The output folder for sample processing.
+        update_pb (Callable): Function to update the progress bar.
+        skip_middle_stages (bool): Flag to skip intermediate processing stages.
+        is_blastnr (bool): Flag for running BLAST with nr database.
+        is_blastnt (bool): Flag for running BLAST with nt database.
+        is_blastBoth (bool): Flag for running BLAST with both databases.
+
+    Returns:
+        None
+    """
+    print("_process_sample_paired_fastqUUUU")
+    write_log("(pair) process_sample_paired for {sample_name}", f"For skip parameter: {skip_middle_stages}")
+    print("skip_middle_stages", skip_middle_stages)
+    print("aka [5]")
+    if skip_middle_stages:
+        # blastnt_results_file, blastnr_results_file = process_sample_paired_no_middle_stage(is_blastnr, is_blastnt, is_blastBoth, forward_read, reverse_read, output_folder, update_pb)
+        write_log("(pair) {sample_name} with no middle stage: it's like single, so it will be converted to single")
+        blastnt_results_file, blastnr_results_file = process_sample_single(sample_name, forward_read, output_folder, update_pb, is_blastnr, is_blastnt, is_blastBoth, is_mode_ab1)
+    else:
+        blastnt_results_file, blastnr_results_file = process_sample_paired_middle_stage(sample_name, is_blastnr, is_blastnt, is_blastBoth, forward_read, reverse_read, output_folder, update_pb, is_mode_ab1)
+        
+    # refresh_gui(update_pb)
+    write_log_process_pair_single_blast_results(is_blastnr, is_blastnt, is_blastBoth, blastnt_results_file, blastnr_results_file)
     
 
 def process_sample_paired_no_middle_stage(
@@ -582,6 +761,7 @@ def process_sample_paired_middle_stage(
     reverse_read: str,
     output_folder: str,
     update_pb: Callable,
+    is_mode_ab1: bool
 ) -> Tuple[str, str]:
     """
     Process a paired-end sample with intermediate processing stages and run BLAST.
@@ -598,19 +778,32 @@ def process_sample_paired_middle_stage(
     Returns:
         Tuple[str, str]: Paths to BLAST results files for nt and nr databases.
     """
+    print("aka [6]")
+    print("process_sample_paired_middle_stage")
     write_log("process_sample_paired_middle_stage")
     blastnt_results_file = ""
     blastnr_results_file = ""
-    forward_file_input, reverse_file_input = convert_ab1_to_fastq_paired(forward_read, reverse_read, output_folder)
+    if is_mode_ab1:
+        forward_file_input, reverse_file_input = convert_ab1_to_fastq_paired(forward_read, reverse_read, output_folder)
+    else:
+        print("forward_read", forward_read)
+        forward_file_input = transform_file_path(forward_read)
+        reverse_file_input = transform_file_path(reverse_read, "R")
+        print("in fastq mode", forward_file_input, reverse_file_input)
+    
     reverse_file_rc, forward_file_trimmed, reverse_file_trimmed, consensus_fasta_file = perform_middle_stage(forward_file_input, reverse_file_input, output_folder)
+    print("aka [7]")
     if is_blastBoth:
+        print("aka [8]")
         blastnt_results_file = run_blast_pair(consensus_fasta_file, "blastn", "nt", output_folder)
+        print("aka [9]")
         refresh_gui(update_pb)
         blastnr_results_file = run_blast_pair(consensus_fasta_file, "blastx", "nr", output_folder)
     elif is_blastnr:
         blastnr_results_file = run_blast_pair(consensus_fasta_file, "blastx", "nr", output_folder)
     elif is_blastnt:
         blastnt_results_file = run_blast_pair(consensus_fasta_file, "blastn", "nt", output_folder)
+    print("aka [10]")
     refresh_gui(update_pb)
     write_log_process_pair_no_skip_middle_stage(sample_name, forward_file_input, reverse_file_input, reverse_file_rc, forward_file_trimmed, reverse_file_trimmed, consensus_fasta_file)
     return blastnt_results_file, blastnr_results_file 
@@ -742,7 +935,8 @@ def process_samples_folder_paired(
     is_blastnr: bool,
     is_blastnt: bool,
     is_blastBoth: bool,
-    is_overwrite: bool
+    is_overwrite: bool,
+    is_mode_ab1: bool,
 ) -> None:
     """
     Process a folder of paired-end samples.
@@ -773,8 +967,11 @@ def process_samples_folder_paired(
             (is_blastnt and not is_blastBoth and not is_blastnr) or 
             (is_blastnr and not is_blastnt  and not is_blastBoth)):
         raise ValueError("The combinations for is_blastnr, is_blastnt, is_blast_both is not valid, only one must be True and all others must be False")
-    
-    return _process_samples_folder_paired(samples_folder, update_pb, skip_middle_stages, is_blastnr, is_blastnt, is_blastBoth, is_overwrite)
+    print("process_samples_folder_paired", is_mode_ab1)
+    if is_mode_ab1:
+        return _process_samples_folder_paired(samples_folder, update_pb, skip_middle_stages, is_blastnr, is_blastnt, is_blastBoth, is_overwrite)
+    else:
+        return _process_samples_folder_paired_fastq(samples_folder, update_pb, skip_middle_stages, is_blastnr, is_blastnt, is_blastBoth, is_overwrite, is_mode_ab1)
 
 def _process_samples_folder_paired(samples_folder, update_pb, skip_middle_stages, is_blastnr, is_blastnt, is_blastBoth, is_overwrite):
     """Process a folder of paired-end samples.
@@ -798,6 +995,31 @@ def _process_samples_folder_paired(samples_folder, update_pb, skip_middle_stages
             futures.append(future)
         concurrent.futures.wait(futures)
     write_log("Finished all paired files")
+    
+def _process_samples_folder_paired_fastq(samples_folder, update_pb, skip_middle_stages, is_blastnr, is_blastnt, is_blastBoth, is_overwrite, is_mode_ab1):
+    """Process a folder of paired-end samples.
+
+    Args:
+        samples_folder (str): Path to the folder containing paired-end samples.
+        update_pb (function): Function to update the progress bar.
+        skip_middle_stages (bool): Flag to skip intermediate processing stages.
+
+    Returns:
+        None
+    """
+    write_log("process_samples_folder_single. Mode AB1? ", is_mode_ab1)
+    print("aka [4]")
+    reads = find_matching_reads_paired_proc(samples_folder, is_blastnr, is_blastnt, is_blastBoth, is_overwrite, is_mode_ab1)
+    print("reads unique pair ", reads)
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        futures = []
+        for sample_name, (forward_read, reverse_read) in reads.items():
+            sample_output_folder = os.path.join(samples_folder, sample_name)
+            os.makedirs(sample_output_folder, exist_ok=True)
+            future = executor.submit(process_sample_paired, sample_name, forward_read, reverse_read, sample_output_folder, update_pb, skip_middle_stages, is_blastnr, is_blastnt, is_blastBoth, is_mode_ab1)
+            futures.append(future)
+        concurrent.futures.wait(futures)
+    write_log("Finished all paired files")
 
         
 ################################################################
@@ -813,7 +1035,8 @@ def find_matching_reads_single_proc(
     is_blastnr: bool,
     is_blastnt: bool,
     is_blastBoth: bool,
-    is_overwrite: bool
+    is_overwrite: bool,
+    is_mode_ab1: bool
 ) -> Dict[str, str]:
     """
     Find matching single reads in the specified folder and perform BLAST analysis based on specified flags.
@@ -840,15 +1063,18 @@ def find_matching_reads_single_proc(
         raise ValueError("Invalid combination of BLAST flags. Only one of 'is_blastnr', 'is_blastnt', or 'is_blastBoth' should be True.")
     if not os.path.isdir(reads_folder):
         raise ValueError(f"The provided 'reads_folder' is not a valid directory: {reads_folder}")
-
-    return _find_matching_reads_single_proc(reads_folder, is_blastnr, is_blastnt, is_blastBoth, is_overwrite)
+    print("is_mode_ab1", is_mode_ab1)
+    if is_mode_ab1:
+        return _find_matching_reads_single_proc(reads_folder, is_blastnr, is_blastnt, is_blastBoth, is_overwrite)
+    else:
+        return _find_matching_reads_single_proc_fastq(reads_folder, is_blastnr, is_blastnt, is_blastBoth, is_overwrite)
 
 def _find_matching_reads_single_proc(
     reads_folder: str,
     is_blastnr: bool,
     is_blastnt: bool,
     is_blastBoth: bool,
-    is_overwrite: bool
+    is_overwrite: bool,
 ) -> Dict[str, str]:
     """
     Internal function for finding matching single reads in the specified folder.
@@ -866,13 +1092,64 @@ def _find_matching_reads_single_proc(
     forward_reads = {}
     reverse_reads = {}
     print("FFROM here",  is_blastnr, is_blastnt, is_blastBoth)
-    gen_folders = find_gen_single_files(reads_folder, is_blastnr, is_blastnt, is_blastBoth)
+    gen_folders = find_gen_single_files(reads_folder, is_blastnr, is_blastnt, is_blastBoth, is_mode_ab1 = True)
     for file_name in os.listdir(reads_folder):
+        print("New file_name", file_name)
         if file_name.endswith("_R.ab1"):
             sample_name = file_name[:-len("_R.ab1")]
             reverse_reads[sample_name] = os.path.join(reads_folder, file_name)
         elif file_name.endswith("_F.ab1"):
             sample_name = file_name[:-len("_F.ab1")]
+            forward_reads[sample_name] = os.path.join(reads_folder, file_name)
+
+    matches = {}
+    write_log("gen_folders", gen_folders)
+    for sample_name, forward_read in forward_reads.items():
+        write_log(sample_name, "sample_name not in reverse_reads:", sample_name not in reverse_reads)
+        if sample_name not in reverse_reads:
+            write_log("is_overwrite", is_overwrite, "sample_name not in gen_folders", sample_name not in gen_folders, "(not is_overwrite and sample_name not in gen_folders)", (not is_overwrite and sample_name not in gen_folders) )
+            if is_overwrite or (not is_overwrite and sample_name not in gen_folders):
+                matches[sample_name] = forward_read
+    write_log(f"in folder {reads_folder}")
+    write_log("forward_reads", forward_reads)
+    write_log("reverse_reads", reverse_reads)
+    write_log("files that are single that are going to be processed: ", matches)
+    return matches
+
+
+
+def _find_matching_reads_single_proc_fastq(
+    reads_folder: str,
+    is_blastnr: bool,
+    is_blastnt: bool,
+    is_blastBoth: bool,
+    is_overwrite: bool,
+) -> Dict[str, str]:
+    """
+    Internal function for finding matching single reads in the specified folder.
+
+    Args:
+        reads_folder (str): The folder containing the read files.
+        is_blastnr (bool): Flag indicating whether to perform BLASTn.
+        is_blastnt (bool): Flag indicating whether to perform BLASTx.
+        is_blastBoth (bool): Flag indicating whether to perform both BLASTn and BLASTx.
+        is_overwrite (bool): Flag indicating whether to overwrite existing files.
+
+    Returns:
+        Dict[str, str]: A dictionary mapping sample names to single read files.
+    """
+    forward_reads = {}
+    reverse_reads = {}
+    print("FFROM here",  is_blastnr, is_blastnt, is_blastBoth)
+    gen_folders = find_gen_single_files(reads_folder, is_blastnr, is_blastnt, is_blastBoth, is_mode_ab1 = False)
+    print("in _find_matching_reads_single_proc_fastq", os.listdir(reads_folder))
+    for file_name in os.listdir(reads_folder):
+        print("New file_name", file_name)
+        if file_name.endswith("R.fastq"):
+            sample_name = file_name[:-len("R.fastq")]
+            reverse_reads[sample_name] = os.path.join(reads_folder, file_name)
+        elif file_name.endswith("F.fastq"):
+            sample_name = file_name[:-len("F.fastq")]
             forward_reads[sample_name] = os.path.join(reads_folder, file_name)
 
     matches = {}
@@ -1008,6 +1285,9 @@ def run_blast_single(
 
     return _run_blast_single(input_file, program, database, output_folder)
 
+class TimeoutException(Exception):
+    pass
+
 def _run_blast_single(input_file: str, program: str, database: str, output_folder: str) -> str:
     """
     Internal function to perform BLAST for a single-end sample.
@@ -1035,9 +1315,67 @@ def _run_blast_single(input_file: str, program: str, database: str, output_folde
         with open(result_file, "w") as out_handle:
             out_handle.write(result_handle.read())
         result_handle.close()
+
+        has_error, error_message = parse_blast_result(result_file)
+        if has_error:
+            store_error_details(input_file, program, database, output_folder, result_file, error_message, "single")
         return result_file
     else:
         return sleep_till_end_of_day_then_search_again_single(input_file, program, database, output_folder)
+
+
+def parse_blast_result(file_path):
+    """
+    Parse the BLAST XML result file to check for errors.
+
+    Args:
+        file_path (str): Path to the BLAST result XML file.
+
+    Returns:
+        bool: True if an error is found, otherwise False.
+        str: Error message if any.
+    """
+    try:
+        tree = ET.parse(file_path)
+        root = tree.getroot()
+
+        # Check for Iteration_message that indicates an error
+        iteration_message = root.find(".//Iteration_message")
+        if iteration_message is not None:
+            return True, iteration_message.text
+        else:
+            return False, ""
+    except ET.ParseError:
+        print(f"Error parsing XML file: {file_path}")
+        return True, "XML Parsing Error"
+
+
+def store_error_details(input_file, program, database, output_folder, result_file, error_message, function_to_be_called):
+    """
+    Store error details for files that encountered an error during BLAST.
+
+    Args:
+        input_file (str): Path to the input FASTA file.
+        result_file (str): Path to the BLAST result XML file.
+        error_message (str): The error message.
+        :param database:
+    """
+    # Folder name is the name of the file (based on your structure)
+    folder_name = os.path.basename(os.path.dirname(input_file))
+    ab1_file = os.path.join(os.path.dirname(input_file), f"{folder_name}.ab1")
+
+    # Create a summary dictionary to store information
+    error_details = {
+        'input_file': input_file,
+        'program': program,
+        'database': database,
+        'output_folder': output_folder,
+        'result_file': result_file,
+        'error_message': error_message,
+        'num_trials': 1,
+        'function_to_be_called': function_to_be_called
+    }
+    files_with_error.append(error_details)
 
 
 def sleep_till_end_of_day_then_search_again_single(input_file: str, program: str, database: str, output_folder: str) -> str:
@@ -1083,7 +1421,8 @@ def process_sample_single(
     update_pb: Callable,
     is_blastnr: bool,
     is_blastnt: bool,
-    is_blastBoth: bool
+    is_blastBoth: bool,
+    is_mode_ab1: bool,
 ) -> None:
     """
     Process a single-end sample, including conversion to FASTQ, trimming, and BLAST analysis.
@@ -1107,8 +1446,13 @@ def process_sample_single(
         raise ValueError(f"The output folder path is not valid: {output_folder}")
     if not isinstance(is_blastnr, bool) or not isinstance(is_blastnt, bool) or not isinstance(is_blastBoth, bool):
         raise ValueError("is_blastnr, is_blastnt, and is_blastBoth must be boolean values.")
-
-    return _process_sample_single(sample_name, forward_read, output_folder, update_pb, is_blastnr, is_blastnt, is_blastBoth)
+    print("HEX [6]", is_mode_ab1)
+    if is_mode_ab1:
+        print("HEX [7]")
+        return _process_sample_single(sample_name, forward_read, output_folder, update_pb, is_blastnr, is_blastnt, is_blastBoth)
+    else:
+        print("HEX [8]", sample_name, forward_read, output_folder)
+        return _process_sample_single_fastq(sample_name, forward_read, output_folder, update_pb, is_blastnr, is_blastnt, is_blastBoth)
 
 
 def _process_sample_single(
@@ -1131,6 +1475,7 @@ def _process_sample_single(
     Returns:
         None
     """
+    print("HEX [9]")
     forward_file_input = convert_ab1_to_fastq_single(forward_read, output_folder)
     forward_file_trimmed = trim_fastq(forward_file_input, output_folder)
     forward_file_fasta = convert_fastq_to_fasta(forward_file_trimmed, output_folder)
@@ -1151,6 +1496,62 @@ def _process_sample_single(
     write_log_process_pair_single_blast_results(is_blastnr, is_blastnt, is_blastBoth, blastnt_results_file, blastnr_results_file)
         
  
+ 
+def transform_file_path(forward_file_input: str, pre = "F") -> str:
+    base_dir = os.path.dirname(forward_file_input)
+    file_name = os.path.basename(forward_file_input)
+    sample_name = file_name.split(f'{pre}.fastq')[0]
+    new_dir = os.path.join(base_dir, sample_name)
+    new_file_path = os.path.join(new_dir, file_name)
+    return new_file_path
+
+
+def _process_sample_single_fastq(
+    sample_name: str,
+    forward_file_input: str,
+    output_folder: str,
+    update_pb: Callable,
+    is_blastnr: bool,
+    is_blastnt: bool,
+    is_blastBoth: bool
+) -> None:
+    """Process a single-end sample, including conversion, trimming, and BLAST.
+
+    Args:
+        sample_name (str): The name of the sample.
+        forward_read (str): Path to the forward read file.
+        output_folder (str): The output folder for sample processing.
+        update_pb (function): Function to update the progress bar.
+        forward_file_input: the fastq file
+    Returns:
+        None
+    """
+    print("HEX [9]")
+    print("HEX [10]", forward_file_input, output_folder)
+    forward_file_trimmed = trim_fastq(forward_file_input, output_folder)
+    print("HEX [11]")
+    forward_file_fasta = convert_fastq_to_fasta(forward_file_trimmed, output_folder)
+    print("HEX [12]")
+    if is_blastBoth:
+        print("HEX [14]")
+        blastnr_results_file = run_blast_single(forward_file_fasta, "blastx", "nr", output_folder)
+        refresh_gui(update_pb)
+        blastnt_results_file = run_blast_single(forward_file_fasta, "blastn", "nt", output_folder)
+    elif is_blastnr:
+        print("HEX [15]")
+        blastnr_results_file = run_blast_single(forward_file_fasta, "blastx", "nr", output_folder)
+    else:
+        print("HEX [16]")
+        blastnt_results_file = run_blast_single(forward_file_fasta, "blastn", "nt", output_folder)
+        
+    refresh_gui(update_pb)
+    write_log("Sample:", sample_name)
+    write_log("Forward Fastq:", forward_file_input)
+    write_log("Trimmed Forward Fastq:", forward_file_trimmed)
+    write_log("Forward FASTA:", forward_file_fasta)
+    write_log_process_pair_single_blast_results(is_blastnr, is_blastnt, is_blastBoth, blastnt_results_file, blastnr_results_file)
+        
+ 
 
 def process_samples_folder_single(
     samples_folder: str,
@@ -1158,7 +1559,8 @@ def process_samples_folder_single(
     is_blastnr: bool,
     is_blastnt: bool,
     is_blastBoth: bool,
-    is_overwrite: bool
+    is_overwrite: bool,
+    is_mode_ab1: bool
 ) -> None:
     """
     Process all single-end samples within a specified folder.
@@ -1192,8 +1594,14 @@ def process_samples_folder_single(
             (is_blastnt and not is_blastBoth and not is_blastnr) or 
             (is_blastnr and not is_blastnt  and not is_blastBoth)):
         raise ValueError("The combinations for is_blastnr, is_blastnt, is_blast_both is not valid, only one must be True and all others must be False")
+    
+    print("HEX [2]")
     print("from _process_samples_folder_single: is_blastnr, is_blastnt, is_blastBoth", is_blastnr, is_blastnt, is_blastBoth)
-    return _process_samples_folder_single(samples_folder, update_pb, is_blastnr, is_blastnt, is_blastBoth, is_overwrite)
+    if is_mode_ab1:
+        print("HEX [3]")
+        return _process_samples_folder_single(samples_folder, update_pb, is_blastnr, is_blastnt, is_blastBoth, is_overwrite, is_mode_ab1)
+    else:
+        return _process_samples_folder_single_fastq(samples_folder, update_pb, is_blastnr, is_blastnt, is_blastBoth, is_overwrite, is_mode_ab1)
 
 def _process_samples_folder_single(
     samples_folder: str,
@@ -1201,7 +1609,8 @@ def _process_samples_folder_single(
     is_blastnr: bool,
     is_blastnt: bool,
     is_blastBoth: bool,
-    is_overwrite: bool
+    is_overwrite: bool,
+    is_mode_ab1: bool
 ) -> None:
     """
     Internal function to process all single-end samples in a specified folder.
@@ -1214,14 +1623,54 @@ def _process_samples_folder_single(
         is_blastBoth (bool, optional): Flag indicating whether to perform both BLASTx and BLASTn.
         is_overwrite (bool, optional): Flag indicating whether to overwrite existing files.
     """
-    write_log("process_samples_folder_single")
-    reads = find_matching_reads_single_proc(samples_folder, is_blastnr, is_blastnt, is_blastBoth, is_overwrite)
+    print("HEX [4]")
+    write_log("process_samples_folder_single. Mode AB1? ", is_mode_ab1)
+    reads = find_matching_reads_single_proc(samples_folder, is_blastnr, is_blastnt, is_blastBoth, is_overwrite, is_mode_ab1)
+    print("reads unique find_matching_reads_single_proc", reads, is_mode_ab1)
+    print("HEX [5]")
     with concurrent.futures.ThreadPoolExecutor() as executor:
         futures = []
         for sample_name, forward_read in reads.items():
             sample_output_folder = os.path.join(samples_folder, sample_name)
             os.makedirs(sample_output_folder, exist_ok=True)
-            future = executor.submit(process_sample_single, sample_name, forward_read, sample_output_folder, update_pb, is_blastnr, is_blastnt, is_blastBoth)
+            future = executor.submit(process_sample_single, sample_name, forward_read, sample_output_folder, update_pb, is_blastnr, is_blastnt, is_blastBoth, is_mode_ab1 = True)
+            futures.append(future)
+        concurrent.futures.wait(futures)
+    write_log("Finished all single files")
+
+
+def _process_samples_folder_single_fastq(
+    samples_folder: str,
+    update_pb: [Callable] ,
+    is_blastnr: bool,
+    is_blastnt: bool,
+    is_blastBoth: bool,
+    is_overwrite: bool,
+    is_mode_ab1: bool
+) -> None:
+    """
+    Internal function to process all single-end samples in a specified folder.
+
+    Args:
+        samples_folder (str): Path to the folder containing sample files.
+        update_pb (function, optional): Function to update the progress bar.
+        is_blastnr (bool, optional): Flag indicating whether to perform BLASTx.
+        is_blastnt (bool, optional): Flag indicating whether to perform BLASTn.
+        is_blastBoth (bool, optional): Flag indicating whether to perform both BLASTx and BLASTn.
+        is_overwrite (bool, optional): Flag indicating whether to overwrite existing files.
+    """
+    print("AKA [2]")
+    write_log("process_samples_folder_single. Mode AB1? ", is_mode_ab1)
+    reads = find_matching_reads_single_proc(samples_folder, is_blastnr, is_blastnt, is_blastBoth, is_overwrite, is_mode_ab1)
+    print("reads unique find_matching_reads_single_proc", reads, is_mode_ab1)
+    print("HEX [_process_samples_folder_single_fastq]")
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        futures = []
+        for sample_name, forward_read in reads.items():
+            sample_output_folder = os.path.join(samples_folder, sample_name)
+            print("HEX sample_name", sample_name, forward_read, sample_output_folder)
+            os.makedirs(sample_output_folder, exist_ok=True)
+            future = executor.submit(process_sample_single, sample_name, forward_read, sample_output_folder, update_pb, is_blastnr, is_blastnt, is_blastBoth, is_mode_ab1)
             futures.append(future)
         concurrent.futures.wait(futures)
     write_log("Finished all single files")
@@ -1378,7 +1827,7 @@ class SangerLogicWorker(QObject):
     update_progress_signal = pyqtSignal(int)
 
     def __init__(self, folder_path, skip_middle_stages, is_blastnr, is_blastnt, is_blastBoth,
-                is_single, is_paired, is_singlePair_both, is_overwrite, num_blast_requests):
+                is_single, is_paired, is_singlePair_both, is_overwrite, num_blast_requests, is_mode_ab1):
         super().__init__()
         self.folder_path = folder_path
         self.skip_middle_stages = skip_middle_stages
@@ -1392,6 +1841,8 @@ class SangerLogicWorker(QObject):
         self.num_blast_requests = num_blast_requests
         global total_num_samples
         total_num_samples = self.num_blast_requests
+        self.is_mode_ab1 = is_mode_ab1
+        self
 
     def start_sanger_logic(self):
         # global num_finish
@@ -1404,31 +1855,91 @@ class SangerLogicWorker(QObject):
         #     result = future.result()
         #     print("Update progress result:", result)
         # self._update_progress(50)  # Initialize progress bar
-
+        global is_model_ab1
         start_time = time.time()
         write_log("Start time of selected folder path", start_time)
 
         if self.is_single:
             write_log("start_sanger_single")
+            print("HEX [1]")
             process_samples_folder_single(self.folder_path, self._update_progress,
-                                        self.is_blastnr, self.is_blastnt, self.is_blastBoth, self.is_overwrite)
+                                        self.is_blastnr, self.is_blastnt, self.is_blastBoth, self.is_overwrite, self.is_mode_ab1)
         elif self.is_paired:
             write_log("start_sanger_pair")
             process_samples_folder_paired(self.folder_path, self._update_progress,
                                         self.skip_middle_stages, self.is_blastnr, self.is_blastnt, self.is_blastBoth,
-                                        self.is_overwrite)
+                                        self.is_overwrite, self.is_mode_ab1)
         else:
             write_log("start_sanger_both")
+            print("AKA [0]")
             with concurrent.futures.ThreadPoolExecutor() as executor:
-                future_single = executor.submit(process_samples_folder_single, self.folder_path, self._update_progress)
+                future_single = executor.submit(process_samples_folder_single, self.folder_path, self._update_progress,
+                                        self.is_blastnr, self.is_blastnt, self.is_blastBoth, self.is_overwrite, self.is_mode_ab1)
                 future_paired = executor.submit(process_samples_folder_paired, self.folder_path, self._update_progress,
-                                                self.skip_middle_stages)
+                                        self.skip_middle_stages, self.is_blastnr, self.is_blastnt, self.is_blastBoth,
+                                        self.is_overwrite, self.is_mode_ab1)
             concurrent.futures.wait([future_single, future_paired])
 
         end_time_all = time.time()
         write_log("Time paired of selected folder path", str(end_time_all - start_time), " Seconds")
-
+        if files_with_error:
+            write_log("There are some failed files, I will sleep for 30 mins then i will retry them again")
+            self.csv_file_path = os.path.join(self.folder_path, 'error_summary.csv')
+            save_all_errors_to_csv(self.csv_file_path)
+            retry_failed_files()
+        else:
+            write_log("Found to errors. It's Done")
+        self._write_failed_files_log()
+        
     def _update_progress(self, value):
         write_log("in _update_progress", value)
         # Emit the signal to update the progress bar
         self.update_progress_signal.emit(int(value))
+        
+    def _write_failed_files_log(self):
+        if failed_files:
+            with open("failed_files.log", "w") as log_file:
+                log_file.write("The following files failed to process:\n")
+                for file_name in failed_files:
+                    log_file.write(f"{file_name}\n")
+            write_log("Failed files log has been written.")
+        else:
+            write_log("No failed files to log.")
+
+def save_all_errors_to_csv(csv_file_path):
+    """
+    Save all stored error details to a CSV file once all files have been processed.
+    """
+    if files_with_error:
+        with open(csv_file_path, mode='w', newline='') as file:
+            writer = csv.writer(file)
+            writer.writerow(['input_file', 'program', 'database', 'output_folder',
+                             'result_file', 'error_message', 'num_trials', 'function_to_be_called'])
+            for error in files_with_error:
+                writer.writerow([
+                    error['input_file'],
+                    error['program'],
+                    error['database'],
+                    error['output_folder'],
+                    error['result_file'],
+                    error['error_message'],
+                    error['num_trials'],
+                    error['function_to_be_called']
+                ])
+
+
+def retry_failed_files():
+    """
+    Retry all the files with errors after a 30-minute interval.
+    """
+    print("There are some failed files, I will sleep for 30 minutes, then retry them.")
+    time.sleep(30*60)
+
+
+    # Retry the files using the function specified
+    for error in files_with_error:
+        write_log("Retrying the file: ", error['input_file'])
+        if error['function_to_be_called'] == 'single':
+            _run_blast_single(error['input_file'], error['program'], error['database'], error['output_folder'])
+        elif error['function_to_be_called'] == 'pair':
+            _run_blast_pair(error['input_file'], error['program'], error['database'], error['output_folder'])

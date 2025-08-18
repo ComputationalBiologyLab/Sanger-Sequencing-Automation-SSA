@@ -24,6 +24,29 @@ from PIL import Image, ImageOps
 from PyQt5.QtWidgets import QLabel, QWidget, QApplication
 from PyQt5.QtGui import QPixmap, QImage
 from PyQt5.QtCore import Qt, QByteArray
+import sys
+from PyQt5.QtWidgets import (
+    QMessageBox,
+    QWidget,
+    QVBoxLayout,
+    QLabel,
+    QComboBox,
+    QPushButton,
+    QTableView,
+    QApplication,
+)
+from PyQt5.QtGui import QPixmap, QPalette, QColor, QStandardItemModel, QStandardItem
+from PyQt5.QtCore import Qt, QByteArray
+import os
+from utils.results_utils import find_folders_gen
+from utils.design_utils import mask_image
+from post_proc.analyze_nt import *
+from PIL import Image
+import requests
+from io import BytesIO
+import pandas as pd
+
+
 
 
 class ResultsPage(QWidget):
@@ -32,7 +55,7 @@ class ResultsPage(QWidget):
         self.parent = parent
         self.first_time_flag = True
         self.init_ui()
-
+        self.current_df = None  # Store the current dataframe
 
     def init_ui(self):
         # Back button
@@ -41,7 +64,7 @@ class ResultsPage(QWidget):
             "QPushButton { color: white; font-size: 14px; background-color: #008CBA; border: none; padding: 10px; border: none;border-radius: 10px; padding: 10px 20px;}"
             "QPushButton:hover { background-color: #006400; }"
         )
-        
+
         url = 'https://i.ibb.co/k8zM2CB/zewail-City-logo-large-notxt.png'
         response = requests.get(url)
         imgdata = Image.open(BytesIO(response.content))
@@ -57,33 +80,38 @@ class ResultsPage(QWidget):
         self.ilabel.setPixmap(scaled_pixmap)
         self.ilabel.setAlignment(Qt.AlignCenter)
 
+        # File type dropdown menu
+        self.file_type_combo = QComboBox(self)
+        self.file_type_combo.addItems(["nt", "nr"])
+        self.file_type_combo.setStyleSheet("font-size: 20px; height: 40px;")  # Increase font size and height
+        self.file_type_combo.activated.connect(self.on_folder_selected)
         
-        # img_path = os.path.join("assets", "images", "Zewail-City.png")
-        # img_path = get_asset_path('images/zewailCity_logo_large_notxt.png')
-
-        # imgdata = open(img_path, 'rb').read()
-        # pixmap = mask_image(imgdata)
-        # self.ilabel = QLabel(self)
-        # self.ilabel.setPixmap(pixmap)
-        # self.ilabel.setAlignment(Qt.AlignTop | Qt.AlignHCenter)
-
-        # Dropdown menu
-        self.comboBox = QComboBox(self)
-        self.comboBox.activated.connect(self.on_folder_selected)
+        # Folder dropdown menu
+        self.folder_combo = QComboBox(self)
+        self.folder_combo.activated.connect(self.on_folder_selected)
 
         # Apply styles to the combo box
-        self.comboBox.setStyleSheet("font-size: 25px;")  # Set font size
-        font = self.comboBox.font()
+        self.folder_combo.setStyleSheet("font-size: 25px;")  # Set font size
+        font = self.folder_combo.font()
         font.setPointSize(70)
-        self.comboBox.setFont(font)
+        self.folder_combo.setFont(font)
 
-
-        # table
+        # Table
         self.table_view = QTableView(self)
-        self.table_view.setStyleSheet("QTableView QTableWidget QTableCornerButton::section { background-color: grey; }"
-                                    "QTableView QHeaderView::section { background-color: grey; color: white; }"
-                                    "QTableView { alternate-background-color: white; color: white; }")
-        
+        self.table_view.setStyleSheet(
+            "QTableView { background-color: white; alternate-background-color: #f0f0f0; color: black; }"
+            "QTableView::item { color: black; }"
+            "QHeaderView::section { background-color: grey; color: white; }"
+        )
+
+        # Download button
+        self.download_button = QPushButton("Download as CSV", self)
+        self.download_button.setStyleSheet(
+            "QPushButton { color: white; font-size: 14px; background-color: #008CBA; border: none; padding: 10px; border: none;border-radius: 10px; padding: 10px 20px;}"
+            "QPushButton:hover { background-color: #006400; }"
+        )
+        self.download_button.clicked.connect(self.download_csv)
+
         # Set the main layout and adjust spacing
         main_layout = QVBoxLayout(self)
         # Create a sub-layout for the back button and set its alignment
@@ -93,10 +121,12 @@ class ResultsPage(QWidget):
         # Add the button layout to the main layout
         main_layout.addLayout(button_layout)
 
-        # Add the image and combo box to the main layout
+        # Add the image, file type combo box, folder combo box, table, and download button to the main layout
         main_layout.addWidget(self.ilabel)
-        main_layout.addWidget(self.comboBox)
+        main_layout.addWidget(self.file_type_combo)
+        main_layout.addWidget(self.folder_combo)
         main_layout.addWidget(self.table_view)
+        main_layout.addWidget(self.download_button)
 
         main_layout.setSpacing(12)  # Adjust the spacing as needed
         main_layout.setAlignment(Qt.AlignTop | Qt.AlignHCenter)  # Align the layout to the top and center
@@ -104,16 +134,8 @@ class ResultsPage(QWidget):
 
         # Load UI for the first time
         self.reload_ui()
-        
 
     def show_warning_on_first_time(self):
-        # print("x1")
-        # if self.first_time_flag:
-        #     print("x2")
-        #     self.first_time_flag = False 
-        #     return
-        # elif not self.parent.selected_dir:
-        #     print("x3")
         if not self.parent.selected_dir:
             self.show_custom_warning("Please select a folder from the main page.")
 
@@ -127,11 +149,11 @@ class ResultsPage(QWidget):
         if not self.parent.selected_dir:
             return
         if self.parent.selected_dir and not find_folders_gen(self.parent.selected_dir):
-            self.show_custom_warning("Please select a folder that contain files named like \"Samplex_F.ab1\" or \"Samplex_R.ab1\"")
+            self.show_custom_warning("Please select a folder that contains files named like \"Samplex_F.ab1\" or \"Samplex_R.ab1\"")
 
         self.get_all_folder_names()
-        self.comboBox.clear()
-        self.comboBox.addItems(self.folder_names)
+        self.folder_combo.clear()
+        self.folder_combo.addItems(self.folder_names)
 
     def get_all_folder_names(self):
         print("self.parent.selected_dir", self.parent.selected_dir)
@@ -141,16 +163,25 @@ class ResultsPage(QWidget):
         print("get_all_folder_names", self.folder_names)
 
     def on_folder_selected(self):
-        selected_folder = self.comboBox.currentText()
-        print(f"Selected Folder: {selected_folder}")
-        xml_file_path = os.path.join(self.parent.selected_dir, selected_folder, "blast_results_nt.xml")  # Replace with the actual path
-        df = get_results_for_nt(xml_file_path)
+        selected_folder = self.folder_combo.currentText()
+        selected_file_type = self.file_type_combo.currentText()
+        print(f"Selected Folder: {selected_folder}, Selected File Type: {selected_file_type}")
+        xml_file_path = os.path.join(self.parent.selected_dir, selected_folder, f"blast_results_{selected_file_type}.xml")
+        
+        if not os.path.exists(xml_file_path):
+            QMessageBox.warning(self, "Warning", f"No {selected_file_type} file found in the selected folder.")
+            return
+        
+        if selected_file_type == "nt":
+            df = get_results_for_nt(xml_file_path)
+        else:
+            df = get_results_for_nt(xml_file_path)
+
+        self.current_df = df  # Store the dataframe
         self.display_dataframe(df)
 
     def view_summary(self):
         self.parent().stacked_widget.setCurrentIndex(2)  # Switch to the SummaryPage
-
-    
 
     def display_dataframe(self, df):
         # Convert DataFrame to QStandardItemModel
@@ -165,6 +196,15 @@ class ResultsPage(QWidget):
 
         # Set the model to the QTableView
         self.table_view.setModel(model)
+
+    def download_csv(self):
+        if self.current_df is not None:
+            selected_folder = self.folder_combo.currentText()
+            save_path = os.path.join(self.parent.selected_dir, selected_folder, "results.csv")
+            self.current_df.to_csv(save_path, index=False)
+            QMessageBox.information(self, "Success", f"CSV file saved to: {save_path}")
+        else:
+            QMessageBox.warning(self, "Warning", "No data to save.")
 
     def show_custom_warning(self, message):
         msg_box = QMessageBox()
@@ -192,6 +232,3 @@ class ResultsPage(QWidget):
         if result == QMessageBox.Accepted:
             # OK button was clicked, do something if needed
             pass
-
-
-    

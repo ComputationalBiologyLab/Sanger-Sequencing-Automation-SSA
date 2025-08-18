@@ -27,7 +27,7 @@ class InstructionsPage(QWidget):
         self.instructions_label.setAlignment(Qt.AlignTop | Qt.AlignLeft)
         self.instructions_label.setStyleSheet('color: white;')
         font = self.instructions_label.font()
-        font.setPointSize(12)
+        font.setPointSize(20)
         font.setBold(True)
         self.instructions_label.setFont(font)
 
@@ -60,7 +60,7 @@ class InstructionsPage(QWidget):
 
         1. NCBI Limits: Maximum of 100 requests per day to avoid slower processing.
         2. Request Allocation: Up to 50 files for both blastnr and blastnt, or 100 for one type.
-        3. Request Interval: Mandatory 10-second gap between requests for NCBI compliance.
+        3. Request Interval: Mandatory 4-second gap between requests for NCBI compliance.
         4. Overwrite Option: Choose 'Overwrite' to regenerate existing blast files.
         5. Naming Convention:
             - Single files: 'Samplex_F.ab1'.

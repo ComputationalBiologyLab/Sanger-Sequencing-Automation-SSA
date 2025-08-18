@@ -32,11 +32,11 @@ class MainPage(QWidget):
 
         self.update_progress_signal = UpdateProgressBarSignal()
         self.update_progress_signal.update_signal.connect(self.update_progress_bar)
-
+        self.is_mode_ab1 = True
         self.init_ui()
 
     def init_ui(self):
-        url = 'https://i.ibb.co/S36xs7n/zewail-City-logo-large-notxt-transformed.png'
+        url = 'https://i.ibb.co/72M2qKY/cbc-unit-no-back-cropped.png'
         response = requests.get(url)
         imgdata = Image.open(BytesIO(response.content))
         with BytesIO() as buffer:
@@ -53,11 +53,12 @@ class MainPage(QWidget):
         
 
         # Instructions
-        self.tlabel = QLabel('Please read the instructions file before using the software \n Developed by a Research group in Zewail City', self)
+        # self.tlabel = QLabel('Please read the instructions file before using the software \n Developed by a Research group in Zewail City', self)
+        self.tlabel = QLabel('Developed by BCB unit', self)
         self.tlabel.setAlignment(Qt.AlignTop | Qt.AlignHCenter)
         self.tlabel.setStyleSheet('color: white;')
         font = self.tlabel.font()
-        font.setPointSize(12)
+        font.setPointSize(14)
         self.tlabel.setFont(font)
 
         # Separator
@@ -67,11 +68,18 @@ class MainPage(QWidget):
         separator_line.setStyleSheet('background-color: white;')
 
         # is send more than 100 requests/day?
-        self.radio_button_no_snd100 = QRadioButton("Don't send more than 100 blast requests per day", self)
-        self.radio_button_snd100 = QRadioButton("Send more than 100 blast requests per day", self)
+        self.label_requests = QLabel('Number of requests:', self)
+        font = QFont()
+        font.setBold(True)
+        font.setPointSize(16)  # Adjust the font size as needed
+        self.label_requests.setFont(font)
+        self.label_requests.setStyleSheet('color: white;')
+        
+        self.radio_button_no_snd100 = QRadioButton("More than 100", self)
+        self.radio_button_snd100 = QRadioButton("Less than 100", self)
 
         radio_button_snd100_font = self.radio_button_no_snd100.font()
-        radio_button_snd100_font.setPointSize(12)
+        radio_button_snd100_font.setPointSize(14)
         self.radio_button_no_snd100.setFont(radio_button_snd100_font)
         self.radio_button_snd100.setFont(radio_button_snd100_font)
         self.radio_button_no_snd100.setStyleSheet('color: white;')
@@ -80,11 +88,19 @@ class MainPage(QWidget):
         self.radio_button_snd100.clicked.connect(self.calc_final_notes)
 
         radio_layout_snd100 = QHBoxLayout()
+        radio_layout_snd100.addWidget(self.label_requests, stretch=1)
         radio_layout_snd100.addWidget(self.radio_button_no_snd100, stretch=1)
         radio_layout_snd100.addWidget(self.radio_button_snd100, stretch=1)
         self.radio_button_no_snd100.setChecked(True)
 
         # Blastnr/Blastnt/Both?
+        self.label_blast_mode = QLabel('Blast mode: ', self)
+        font = QFont()
+        font.setBold(True)
+        font.setPointSize(16)  # Adjust the font size as needed
+        self.label_blast_mode.setFont(font)
+        self.label_blast_mode.setStyleSheet('color: white;')
+        
         self.radio_button_blastnr = QRadioButton("Blastnr", self)
         self.radio_button_blastnt = QRadioButton("Blastnt", self)
         self.radio_button_blastBoth = QRadioButton("Both", self)
@@ -102,6 +118,7 @@ class MainPage(QWidget):
         self.radio_button_blastBoth.clicked.connect(self.calc_final_notes)
 
         radio_layout_blast = QHBoxLayout()
+        radio_layout_blast.addWidget(self.label_blast_mode, stretch=1)
         radio_layout_blast.addWidget(self.radio_button_blastnr, stretch=1)
         radio_layout_blast.addWidget(self.radio_button_blastnt, stretch=1)
         radio_layout_blast.addWidget(self.radio_button_blastBoth, stretch=1)
@@ -115,6 +132,13 @@ class MainPage(QWidget):
         self.radio_button_blastBoth.setChecked(True)
 
         # Single/Paired/Both?
+        self.label_reads = QLabel('Reads: ', self)
+        font = QFont()
+        font.setBold(True)
+        font.setPointSize(16)  # Adjust the font size as needed
+        self.label_reads.setFont(font)
+        self.label_reads.setStyleSheet('color: white;')
+        
         self.radio_button_single = QRadioButton("Single", self)
         self.radio_button_paired = QRadioButton("Paired", self)
         self.radio_button_both = QRadioButton("Both", self)
@@ -129,6 +153,7 @@ class MainPage(QWidget):
         self.radio_button_both.setStyleSheet('color: white;')
 
         radio_layout_single = QHBoxLayout()
+        radio_layout_single.addWidget(self.label_reads, stretch=1)
         radio_layout_single.addWidget(self.radio_button_single, stretch=1)
         radio_layout_single.addWidget(self.radio_button_paired, stretch=1)
         radio_layout_single.addWidget(self.radio_button_both, stretch=1)
@@ -142,8 +167,15 @@ class MainPage(QWidget):
         self.radio_button_both.setChecked(True)
 
         # Overwrite/Skip?
-        self.radio_button_overwrite = QRadioButton("Overwrite already generated files", self)
-        self.radio_button_skip = QRadioButton("Skip files that had its blastn/x file generated", self)
+        self.label_overwrite = QLabel('Overwrite generated files: ', self)
+        font = QFont()
+        font.setBold(True)
+        font.setPointSize(16)  # Adjust the font size as needed
+        self.label_overwrite.setFont(font)
+        self.label_overwrite.setStyleSheet('color: white;')
+        
+        self.radio_button_overwrite = QRadioButton("Yes", self)
+        self.radio_button_skip = QRadioButton("No", self)
 
         radio_button_overwrite_font = self.radio_button_overwrite.font()
         radio_button_overwrite_font.setPointSize(12)
@@ -153,6 +185,7 @@ class MainPage(QWidget):
         self.radio_button_skip.setStyleSheet('color: white;')
 
         radio_layout_overwrite = QHBoxLayout()
+        radio_layout_overwrite.addWidget(self.label_overwrite, stretch=1)
         radio_layout_overwrite.addWidget(self.radio_button_overwrite, stretch=1)
         radio_layout_overwrite.addWidget(self.radio_button_skip, stretch=1)
 
@@ -164,7 +197,7 @@ class MainPage(QWidget):
         self.radio_button_skip.setChecked(True)
 
         ## Skip middle stage:
-        self.checkbox_skip_middle_stage = QCheckBox("Skip middle stage", self)
+        self.checkbox_skip_middle_stage = QCheckBox("Skip low quality reads trimming", self)
         self.checkbox_skip_middle_stage.setStyleSheet('color: white; font-size: 12pt;')
 
         checkbox_layout = QVBoxLayout()
@@ -248,8 +281,8 @@ class MainPage(QWidget):
         ''')
         self.text_browser.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)  # Set size policy
         self.text_browser.setPlainText(
-            "This is a sample text that can contain multiple lines.\n"
-            "You can customize the content and appearance as needed."
+            "Please select a folder\n"
+            "and then start sanger"
         )
 
 
@@ -348,7 +381,39 @@ class MainPage(QWidget):
             
         self.update_summary_notes()
 
-    def update_summary_notes(self):
+    def update_summary_notes (self):
+        if not self.parent.selected_dir == "":
+            has_fastq_file = any(file.endswith('.fastq') for file in os.listdir(self.parent.selected_dir))
+            if has_fastq_file:
+                self.is_mode_ab1 = False
+                print("At least one .fastq file is present in the directory.")
+                self.update_summary_notes_fastq()
+            else:
+                self.is_mode_ab1 = True
+                print("No .fastq files found in the directory.")
+                self.update_summary_notes_ab1()
+            self.text_browser.clear()
+            for info_item in self.lst_summary:
+                    self.text_browser.append(info_item)
+            self.text_browser.verticalScrollBar().setValue(self.text_browser.verticalScrollBar().maximum())
+                
+    def update_summary_notes_fastq(self):
+        self.lst_summary.append(f"Mode: fastq files")
+        if not self.parent.selected_dir == "":
+            self.lst_summary.append(f"Folders with the same sample name will be generated")
+            self.handle_fastq_files_gen_folders()
+            additional_info = self.cal_summary_num_files(
+                self.radio_button_overwrite.isChecked(),
+                self.radio_button_single.isChecked(),
+                self.radio_button_paired.isChecked(),
+                self.radio_button_both.isChecked()
+            )
+
+            self.lst_summary.extend(additional_info)
+
+        
+    def update_summary_notes_ab1 (self):
+        self.lst_summary.append(f"Mode: AB1 files")
         if not self.parent.selected_dir == "":
 
             # Calculate and append additional information
@@ -361,14 +426,41 @@ class MainPage(QWidget):
 
             self.lst_summary.extend(additional_info)
 
-        self.text_browser.clear()
-        for info_item in self.lst_summary:
-                self.text_browser.append(info_item)
-        self.text_browser.verticalScrollBar().setValue(self.text_browser.verticalScrollBar().maximum())
+        
+    def handle_fastq_files_gen_folders(self):
+        import re
+        import shutil
+        if not self.parent.selected_dir == "":
+            selected_dir = self.parent.selected_dir
+            files = os.listdir(selected_dir)
+            
+            pattern = re.compile(r'^(Sample\d+)([FR])\.fastq$')
+            sample_files = {}
+            for file in files:
+                match = pattern.match(file)
+                if match:
+                    sample_prefix = match.group(1)
+                    direction = match.group(2)
+                    if sample_prefix not in sample_files:
+                        sample_files[sample_prefix] = {'F': [], 'R': []}
+                    sample_files[sample_prefix][direction].append(file)
+
+            # Create folders and copy files
+            for sample_prefix, directions in sample_files.items():
+                new_folder_path = os.path.join(selected_dir, sample_prefix)
+                os.makedirs(new_folder_path, exist_ok=True)
+                
+                # Copy forward reads
+                for f_file in directions['F']:
+                    shutil.copy2(os.path.join(selected_dir, f_file), new_folder_path)
+                
+                # Copy reverse reads if they exist
+                for r_file in directions['R']:
+                    shutil.copy2(os.path.join(selected_dir, r_file), new_folder_path)
 
     def cal_summary_num_files(self, is_overwrite, is_single, is_pair, is_both):
         if not self.parent.selected_dir == "":
-            self.num_files_single, self.num_files_pair = find_num_files(self.parent.selected_dir)
+            self.num_files_single, self.num_files_pair = find_num_files(self.parent.selected_dir, self.is_mode_ab1)
 
             self.num_files_all = self.num_files_single + self.num_files_pair
             sel_option = ""
@@ -376,7 +468,7 @@ class MainPage(QWidget):
             elif self.radio_button_blastnr.isChecked(): sel_option = "Blastnr"
             elif self.radio_button_blastnt.isChecked(): sel_option = "Blastnt"
             self.num_files_single_gen, self.num_files_pair_gen = find_num_files_gen(
-                self.parent.selected_dir, self.radio_button_blastnr.isChecked(), self.radio_button_blastnt.isChecked(), self.radio_button_blastBoth.isChecked())
+                self.parent.selected_dir, self.radio_button_blastnr.isChecked(), self.radio_button_blastnt.isChecked(), self.radio_button_blastBoth.isChecked(), self.is_mode_ab1)
             self.num_files_all_gen = self.num_files_single_gen + self.num_files_pair_gen
 
             if is_overwrite:
@@ -452,7 +544,7 @@ class MainPage(QWidget):
             self.sanger_logic_worker = SangerLogicWorker(self.parent.selected_dir, self.skip_middle_stage_value,
                                                         self.is_blastnr, self.is_blastnt, self.is_blastBoth,
                                                         self.is_single, self.is_paired, self.is_singlePair_both,
-                                                        self.is_overwrite, self.num_blast_requests)
+                                                        self.is_overwrite, self.num_blast_requests, self.is_mode_ab1)
 
             self.sanger_logic_worker.moveToThread(self.sanger_thread)
 

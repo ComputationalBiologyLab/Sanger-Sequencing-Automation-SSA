@@ -43,7 +43,7 @@ class MainWindow(QWidget):
         layout.addWidget(self.stacked_widget)
 
         self.setGeometry(950, 100, 950, 800)
-        self.setWindowTitle('Sanger Sequencing Automation (SSA)')
+        self.setWindowTitle('Sanger Sequencing Analyzer (SSA)')
         # first page always
         self.stacked_widget.setCurrentWidget(welcome_page)
         welcome_page.btn_next_to_instructions.clicked.connect(self.show_instruction_page)
