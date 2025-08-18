@@ -38,10 +38,11 @@ If you require more requests:
 ![image](https://github.com/ComputationalBiologyLab/Sanger-Sequencing-Automation-SSA/assets/97539613/247d02c4-a8bf-4414-a9e1-dcb61eddb40e)
 
 
-
 4. In addition to the Summary page for  all
 
 
 ![image](https://github.com/ComputationalBiologyLab/Sanger-Sequencing-Automation-SSA/assets/97539613/8ab2f443-59c1-4c7e-ab54-1685cd834c95)
 
 
+# Results
+For results, pleasea visit this [link](https://drive.google.com/file/d/1G_nGSm9vTh490GP3UOKT4u-8xzG6mPW_/view?usp=sharing)
